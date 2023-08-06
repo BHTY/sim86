@@ -52,10 +52,20 @@ uint16_t mem_read_16(uint32_t addr){
 }
 
 void mem_write_8(uint32_t addr, uint8_t val){
+	if (addr == 0x1130){
+		//printf("Writing byte %02x\n", val);
+		//while (1);
+	}
 	*(memory + addr) = val;
 }
 
 void mem_write_16(uint32_t addr, uint16_t val){
+	if (addr == 0x1130){
+		//printf("Writing word %04x\n", val);
+		//single_step = 1;
+		//double_step = 1;
+	}
+
 	*(uint16_t*)(memory + addr) = val;
 }
 
@@ -115,7 +125,7 @@ void io_write_8(uint16_t port, uint8_t val){
 								break;
 							case 2:
 								lba += (val - 1) * BYTES_PER_SECTOR;
-								printf("Seeking to linear block address %d (byte offset %05x)\n", lba >> 9, lba);
+								//printf("Seeking to linear block address %d (byte offset %05x)\n", lba >> 9, lba);
 								break;
 						}
 
@@ -159,14 +169,17 @@ void create_machine(regs_x86* cpu, bus_x86* bus){
 	fread(memory + 0xf0000, 1, 65536, fp);
 	fclose(fp);
 
-	//disk_fp = fopen("c:\\users\\will\\desktop\\disk01.img", "rb");
-	disk_fp = fopen("c:\\users\\will\\dos20.img", "rb");
+	disk_fp = fopen("c:\\users\\will\\desktop\\disk01.img", "rb");
+	//disk_fp = fopen("c:\\users\\will\\dos20.img", "rb");
 	//disk_fp = fopen("dump.bin", "rb");
+	disk_fp = fopen("dos20.img", "rb");
 
 	//memcpy(memory + 0x7c00, init_program, 512);
 	floppy.cylinders = 40;
 	floppy.tracks_per_cylinder = 1;
-	floppy.sectors_per_track = 9;
+	floppy.sectors_per_track = 8; //9
+
+	global_bus = bus;
 }
 
 int main(int argc, char* argv[])
@@ -186,14 +199,10 @@ int main(int argc, char* argv[])
 		}
 		cpu_step(&registers, &bus);
 
-		if (registers.cs == 0x70){
+		if (registers.cs == 0xb1){
 			single_step = 1;
 			//double_step = 1;
-		}
-
-		if (registers.cs == 0x113){ //idk why this ends up getting blanked out or why 0x9f85:0x009a gets altered
-			single_step = 1;
-			double_step = 1;
+			//registers.running = 0;
 		}
 
 		if (double_step){ getch(); }
@@ -216,15 +225,23 @@ int main(int argc, char* argv[])
 
 	cpu_dump(&registers);
 	
-	printf("0x2130: ");
-	for (int i = 0; i < 16; i++){
-		printf("%02x ", mem_read_16(0x2130 + i));
+	//dump ivt
+	/*for (int i = 0; i < 1024; i += 4){
+		printf("INT%02x: %04x:%04x\n", i / 4, mem_read_16(i + 2), mem_read_16(i));
+	}*/
+
+	registers.cs = 0x251;
+	registers.ip = 0x000; //100?
+
+	printf("0x2510: %02x %02x\n", mem_read_8(registers.cs * 16 + registers.ip), mem_read_8(registers.cs * 16 + registers.ip + 1));
+	registers.running = 1;
+
+	while (registers.running){
+		cpu_step(&registers, &bus);
 	}
 
-	printf("\n");
-
-	FILE* fp = fopen("dump.bin", "wb");
-	fwrite(memory, 1, 1024 * 1024, fp);
+	FILE* fp = fopen("dump_dos.com", "wb");
+	fwrite(memory + 0xb10, 1, 10000, fp);
 	fclose(fp);
 
 	uint32_t vram_ptr = 0x8000;

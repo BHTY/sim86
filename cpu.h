@@ -197,3 +197,4 @@ uint32_t linear_addr_rm(uint16_t, uint16_t);
 void log_instruction(regs_x86*, int, char* fmt, ...);
 
 extern int logging_instructions;
+extern bus_x86* global_bus;

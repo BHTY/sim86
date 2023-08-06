@@ -8,6 +8,8 @@
 int using_segment_override;
 uint16_t segment_override;
 
+bus_x86* global_bus;
+
 void cpu_clear_flag(regs_x86* cpu, uint8_t flag){
 	cpu->flags &= ~(1 << flag);
 }
@@ -44,6 +46,14 @@ void cpu_set_cf(regs_x86* cpu, uint16_t value){
 	}
 }
 
+uint16_t alu_neg_16(regs_x86* cpu, uint16_t a, uint16_t unused){
+	uint16_t result = -a;
+
+	//handle flags
+
+	return a;
+}
+
 uint8_t alu_rol_8(regs_x86* cpu, uint16_t a, uint16_t b){
 	uint8_t result = (a << b) | (a >> (8 - b));
 
@@ -60,11 +70,25 @@ uint32_t alu_mul_16(regs_x86* cpu, uint16_t a, uint16_t b){
 	return result;
 }
 
+uint16_t alu_div_8(regs_x86* cpu, uint16_t a, uint8_t b){
+	uint8_t result = a / b;
+	uint8_t rem = a % b;
+
+	//handle flags & overflow
+
+	return result | (rem << 8);
+}
+
 uint32_t alu_div_16(regs_x86* cpu, uint32_t a, uint16_t b){
+	if (b == 0){
+		cpu_int(cpu, global_bus, 0x0);
+		return 0xffffffff;
+	}
+
 	uint16_t result = a / b;
 	uint16_t rem = a % b;
 
-	// handle flags
+	// handle flags & overflow
 
 	return result | (rem << 16);
 }
@@ -426,12 +450,29 @@ void op_0E(regs_x86* cpu, bus_x86* bus){ //PUSH CS
 	cpu->ip++;
 }
 
+void op_13(regs_x86* cpu, bus_x86* bus){ //ADC r16, r/m16
+	decode_modrm_src_16();
+	value = alu_add_16(cpu, value + (cpu->flags & 0x1), cpu_get_reg_16(cpu, REG(modrm)));
+	cpu_set_reg_16(cpu, REG(modrm), value);
+}
+
+void op_15(regs_x86* cpu, bus_x86* bus){ //ADC AX, imm16
+	uint16_t value = bus->peek_word(linear_addr_rm(cpu->cs, cpu->ip + 1)) + (cpu->flags & 0x1);
+	cpu->ax = alu_add_16(cpu, cpu->ax, value);
+	cpu->ip += 3;
+}
+
 void op_16(regs_x86* cpu, bus_x86* bus){ //PUSH SS
 	log_instruction(cpu, 1, "PUSH SS\n");
 	cpu_push_16(cpu, bus, cpu->cs);
 	cpu->ip++;
-
 }
+
+void op_17(regs_x86* cpu, bus_x86* bus){ //pop ss
+	cpu->ss = cpu_pop_16(cpu, bus);
+	cpu->ip++;
+}
+
 
 void op_19(regs_x86* cpu, bus_x86* bus){ //SBB r/m16, r16
 	uint8_t modrm = bus->peek_byte(linear_addr_rm(cpu->cs, cpu->ip + 1));
@@ -678,6 +719,11 @@ void op_3C(regs_x86* cpu, bus_x86* bus){ //CMP AL, imm8
 	cpu->ip += 2;
 }
 
+void op_3D(regs_x86* cpu, bus_x86* bus){ //CMP AX, imm16
+	alu_sub_16(cpu, cpu->ax, bus->peek_word(linear_addr_rm(cpu->cs, cpu->ip + 1)));
+	cpu->ip += 3;
+}
+
 void op_3E(regs_x86* cpu, bus_x86* bus){ //DS override
 	seg_override(cpu->ds, "DS OVERRIDE: ");
 }
@@ -729,6 +775,16 @@ void op_4A(regs_x86* cpu, bus_x86* bus){ //dec dx
 
 void op_4B(regs_x86* cpu, bus_x86* bus){ //DEC BX
 	dec_16(cpu->bx);
+	cpu->ip++;
+}
+
+void op_4E(regs_x86* cpu, bus_x86* bus){ //DEC SI
+	dec_16(cpu->si);
+	cpu->ip++;
+}
+
+void op_4F(regs_x86* cpu, bus_x86* bus){ //DEC DI
+	dec_16(cpu->di);
 	cpu->ip++;
 }
 
@@ -869,7 +925,7 @@ void op_7E(regs_x86* cpu, bus_x86* bus){ //jng rel8
 }
 
 
-void op_80(regs_x86* cpu, bus_x86* bus){ //OR r/m8, imm8
+void op_80(regs_x86* cpu, bus_x86* bus){ //op r/m8, imm8
 	uint8_t modrm = bus->peek_byte(linear_addr_rm(cpu->cs, cpu->ip + 1));
 	uint16_t offset;
 	uint16_t base = calc_base(cpu, modrm);
@@ -892,6 +948,9 @@ void op_80(regs_x86* cpu, bus_x86* bus){ //OR r/m8, imm8
 	cpu->ip++;
 
 	switch (REG(modrm)){
+		case 0:
+			alu_op_8(alu_add_8, imm);
+			break;
 		case 1:
 			alu_op_8(alu_or_8, imm);
 			break;
@@ -1277,6 +1336,16 @@ void op_90(regs_x86* cpu, bus_x86* bus){ //nop
 	cpu->ip++;
 }
 
+void op_91(regs_x86* cpu, bus_x86* bus){ //xchg ax, cx
+	uint16_t a = cpu->ax;
+	uint16_t b = cpu->cx;
+
+	cpu->ax = b;
+	cpu->cx = a;
+
+	cpu->ip++;
+}
+
 void op_92(regs_x86* cpu, bus_x86* bus){ //xchg ax, dx
 	uint16_t a = cpu->ax;
 	uint16_t b = cpu->dx;
@@ -1297,9 +1366,36 @@ void op_93(regs_x86* cpu, bus_x86* bus){ //xchg ax, bx
 	cpu->ip++;
 }
 
+void op_96(regs_x86* cpu, bus_x86* bus){ //xchg ax, si
+	uint16_t a = cpu->ax;
+	uint16_t b = cpu->si;
+
+	cpu->ax = b;
+	cpu->si = a;
+
+	cpu->ip++;
+}
+
+void op_97(regs_x86* cpu, bus_x86* bus){ //xchg ax, di
+	uint16_t a = cpu->ax;
+	uint16_t b = cpu->di;
+
+	cpu->ax = b;
+	cpu->di = a;
+
+	cpu->ip++;
+}
+
 void op_98(regs_x86* cpu, bus_x86* bus){ //cbw
 	cpu->ax = (int16_t)(int8_t)cpu->al;
 	cpu->ip++;
+}
+
+void op_9A(regs_x86* cpu, bus_x86* bus){ //far call ptr16:16 (absolute)
+	uint16_t seg = bus->peek_word(linear_addr_rm(cpu->cs, cpu->ip + 3));
+	uint16_t offset = bus->peek_word(linear_addr_rm(cpu->cs, cpu->ip + 1));
+	cpu->ip += 5;
+	cpu_call_far(cpu, bus, seg, offset);
 }
 
 void op_A0(regs_x86* cpu, bus_x86* bus){ //mov al, moffs8
@@ -1391,6 +1487,22 @@ void op_AC(regs_x86* cpu, bus_x86* bus){ //lodsb
 		cpu->si--;
 	}else{
 		cpu->si++;
+	}
+
+	cpu->ip++;
+}
+
+void op_AD(regs_x86* cpu, bus_x86* bus){ //lodsw
+	uint16_t source_base = using_segment_override ? segment_override : cpu->ds;
+	cpu->ax = bus->peek_word(linear_addr_rm(source_base, cpu->si));
+
+	log_instruction(cpu, logging_instructions == 1, "LODSW\n");
+
+	if (cpu->flags & 0x400){
+		cpu->si-=2;
+	}
+	else{
+		cpu->si+=2;
 	}
 
 	cpu->ip++;
@@ -1606,6 +1718,9 @@ void op_D3(regs_x86* cpu, bus_x86* bus){ //shift r/m16, cl
 		case 4:
 			alu_op_16(alu_shl_16, cpu->cl);
 			break;
+		case 5:
+			alu_op_16(alu_shr_16, cpu->cl);
+			break;
 		default:
 			printf("Unimplemented case %d for 0xD3!\n", REG(modrm));
 			cpu->running = 0;
@@ -1725,11 +1840,17 @@ void op_F4(regs_x86* cpu, bus_x86* bus){ //HLT
 void op_F6(regs_x86* cpu, bus_x86* bus){ //TEST r/m8, imm8
 	decode_modrm_src_8();
 	uint8_t imm = bus->peek_byte(linear_addr_rm(cpu->cs, cpu->ip));
-	cpu->ip++;
+	uint16_t temp;
 
 	switch (REG(modrm)){
-		case 0:
+		case 0: //TEST r/m8, imm8
+			cpu->ip++;
 			alu_and_8(cpu, value, imm);
+			break;
+		case 4: //DIV r/m8
+			value = alu_div_8(cpu, cpu->ax, value);
+			cpu->al = value;
+			cpu->ah = value >> 8;
 			break;
 		default:
 			printf("Unimplemented case %d for instruction 0xF6!\n", REG(modrm));
@@ -1743,6 +1864,9 @@ void op_F7(regs_x86* cpu, bus_x86* bus){ //MUL r/m16
 	decode_modrm_src_16();
 
 	switch (REG(modrm)){
+		case 3: //neg
+			alu_op_16(alu_neg_16, 0);
+			break;
 		case 4: //mul
 			temp = alu_mul_16(cpu, cpu->ax, value);
 			cpu->ax = temp;
@@ -1797,6 +1921,7 @@ void op_FF(regs_x86* cpu, bus_x86* bus){ //CALL
 	uint8_t modrm = bus->peek_byte(linear_addr_rm(cpu->cs, cpu->ip + 1));
 	uint16_t address, seg;
 	uint16_t base = using_segment_override ? segment_override : cpu->ds;
+	uint16_t offset;
 
 	switch (REG(modrm)){
 		case 2: //CALL r/m16 (near call)
@@ -1820,15 +1945,35 @@ void op_FF(regs_x86* cpu, bus_x86* bus){ //CALL
 			cpu->ip += 4;
 			cpu_call_far(cpu, bus, seg, address);
 			break;
+		case 4: //JMP r/m16 (absolute indirect near -> addr = r/m16)
+			switch (MOD(modrm)){
+				case 3:
+					address = cpu_get_reg_16(cpu, RM(modrm));
+					cpu->ip += 2;
+					break;
+				default:
+					offset = calc_modrm_addr(cpu, bus);
+					address = bus->peek_word(linear_addr_rm(base, offset));
+					break;
+			}
+			cpu->ip = address;
+			break;
+		case 5: //JMP m16:m16 (absolute indirect far jmp)
+			address = bus->peek_word(linear_addr_rm(cpu->cs, cpu->ip + 2));
+			seg = bus->peek_word(linear_addr_rm(base, address + 2));
+			address = bus->peek_word(linear_addr_rm(base, address));
+			cpu->cs = seg;
+			cpu->ip = address;
+			break;
 		default:
-			printf("help!\n");
+			printf("help %d for 0xff @ %04x:%04x!\n", REG(modrm), cpu->cs, cpu->ip);
 			cpu->running = 0;
 			break;
 	}
 }
 
 void(*op_table[256])(regs_x86* cpu, bus_x86* bus) = {
-	0, //0x0
+	op_00, //0x0
 	op_01, //0x1
 	op_02, //0x2
 	op_03, //0x3
@@ -1847,11 +1992,11 @@ void(*op_table[256])(regs_x86* cpu, bus_x86* bus) = {
 	0, //0x10
 	0, //0x11
 	0, //0x12
-	0, //0x13
+	op_13, //0x13
 	0, //0x14
-	0, //0x15
+	op_15, //0x15
 	op_16, //0x16
-	0, //0x17
+	op_17, //0x17
 	0, //0x18
 	op_19, //0x19
 	0, //0x1a
@@ -1889,7 +2034,7 @@ void(*op_table[256])(regs_x86* cpu, bus_x86* bus) = {
 	op_3A, //0x3a
 	op_3B, //0x3b
 	op_3C, //0x3c
-	0, //0x3d
+	op_3D, //0x3d
 	op_3E, //0x3e
 	0, //0x3f
 	op_40, //0x40
@@ -1906,8 +2051,8 @@ void(*op_table[256])(regs_x86* cpu, bus_x86* bus) = {
 	op_4B, //0x4b
 	0, //0x4c
 	0, //0x4d
-	0, //0x4e
-	0, //0x4f
+	op_4E, //0x4e
+	op_4F, //0x4f
 	op_50, //0x50
 	op_51, //0x51
 	op_52, //0x52
@@ -1973,16 +2118,16 @@ void(*op_table[256])(regs_x86* cpu, bus_x86* bus) = {
 	op_8E, //0x8e
 	op_8F, //0x8f
 	op_90, //0x90
-	0, //0x91
+	op_91, //0x91
 	op_92, //0x92
 	op_93, //0x93
 	0, //0x94
 	0, //0x95
-	0, //0x96
-	0, //0x97
+	op_96, //0x96
+	op_97, //0x97
 	op_98, //0x98
 	0, //0x99
-	0, //0x9a
+	op_9A, //0x9a
 	0, //0x9b
 	0, //0x9c
 	0, //0x9d
@@ -2001,7 +2146,7 @@ void(*op_table[256])(regs_x86* cpu, bus_x86* bus) = {
 	op_AA, //0xaa
 	op_AB, //0xab
 	op_AC, //0xac
-	0, //0xad
+	op_AD, //0xad
 	0, //0xae
 	0, //0xaf
 	op_B0, //0xb0
@@ -2197,7 +2342,7 @@ uint16_t cpu_get_reg_16(regs_x86* cpu, uint8_t reg){
 //remember that the IP has to be adjusted before calling one of those functions (especially so that reljumps can be calculated)
 
 void cpu_int(regs_x86* cpu, bus_x86* bus, uint8_t vect){
-	if (!(cpu->flags & 0x200)){
+	if (!(cpu->flags & 0x200) && vect != 0x0){ //shouldnt be special casing 0x0
 		return;
 	}
 
@@ -2205,13 +2350,17 @@ void cpu_int(regs_x86* cpu, bus_x86* bus, uint8_t vect){
 		//printf("Interrupt %xh has been raised! (AH=%02x AL=%02x CH=%02x CL=%02x DH=%02x DL=%02x ES:BX=%04x:%04x CS:IP=%04x:%04x)\n", vect, cpu->ah, cpu->al, cpu->ch, cpu->cl, cpu->dh, cpu->dl, cpu->es, cpu->bx, cpu->cs, cpu->ip);
 		if (cpu->ah == 0x02){
 			printf("%04x:%04x: Loading %d sectors from cylinder %d head %d sector %d to %04x:%04x (%05x)\n", cpu->cs, cpu->ip, cpu->al, cpu->ch, cpu->dh, cpu->cl, cpu->es, cpu->bx, linear_addr_rm(cpu->es, cpu->bx));
+			cpu_clear_flag(cpu, 0); //hacky fix
 		}
 		else{
-			printf("%04x:%04x	Disk interrupt code %02x\n", cpu->cs, cpu->ip, cpu->ah);
+			//printf("%04x:%04x	Disk interrupt code %02x\n", cpu->cs, cpu->ip, cpu->ah);
 		}
 	}
+	else if (vect == 0x00){
+		printf("Divide by zero occured at %04x:%04x\n", cpu->cs, cpu->ip);
+	}
 	else{
-		//printf("Interrupt %xh has been raised! (AH=%02x AL=%02x CH=%02x CL=%02x DH=%02x DL=%02x ES:BX=%04x:%04x CS:IP=%04x:%04x)\n", vect, cpu->ah, cpu->al, cpu->ch, cpu->cl, cpu->dh, cpu->dl, cpu->es, cpu->bx, cpu->cs, cpu->ip);
+		printf("Interrupt %xh has been raised! (AH=%02x AL=%02x CH=%02x CL=%02x DH=%02x DL=%02x CS:IP=%04x:%04x)\n", vect, cpu->ah, cpu->al, cpu->ch, cpu->cl, cpu->dh, cpu->dl, cpu->cs, cpu->ip);
 	}
 
 	//cpu_dump(cpu);
@@ -2242,7 +2391,8 @@ void cpu_iret(regs_x86* cpu, bus_x86* bus){
 	cpu->cs = cpu_pop_16(cpu, bus);
 	cpu->flags = cpu_pop_16(cpu, bus);
 
-	//printf("IRET back to %04x:%04x\n", cpu->cs, cpu->ip);
+	//printf("IRET back to %04x:%04x FLAGS=%04x\n", cpu->cs, cpu->ip, cpu->flags);
+	//printf("Key buffer = %d chars (%02x %02x %02x %02x)\n", bus->peek_byte(0x420), bus->peek_byte(0x400), bus->peek_byte(0x401), bus->peek_byte(0x402), bus->peek_byte(0x403));
 }
 
 void cpu_call_near(regs_x86* cpu, bus_x86* bus, uint16_t ip){
