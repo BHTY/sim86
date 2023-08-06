@@ -16,11 +16,20 @@ int19_isr:
 	push ds
 	mov ax, 0
 	mov ds, ax
-	cmp word [bx], 0xaa55
+	cmp word [bx], 0xaa55 ;check for valid boot sector
 	jne exec_basic
+;print loading message
+	push ds
+	push bx
+	push cs
+	pop ds
+	mov bx, loading_msg
+	call print_string
+	pop bx
+	pop ds
 	jmp 0x0000:0x7c00
 exec_basic:
 	pop ds
 	int 0x18
 
-db 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF
+loading_msg: db "Loading disk...", 0

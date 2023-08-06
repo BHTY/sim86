@@ -22,6 +22,7 @@ wait_loop:
 ;it's not 0, so we pop a key
 	dec byte [ds:NUM_KEYS]
 	call read_key_top
+	mov al, ah
 	ret
 
 int16_get_kbdstate: ;peek a key from the top of the buffer (AX=0 if nothing is there)
@@ -38,6 +39,7 @@ kbdstate_ret0:
 read_key_top:
 	xor bx, bx
 	mov bl, al
+	dec bl
 	mov ah, [ds:bx+START_KEYBUF]
 	xor bx, bx
 	mov bl, ah
@@ -58,7 +60,7 @@ key_isr:
 	jae key_isr_done
 ;append to the list of pushed keys
 	mov bx, [ds:NUM_KEYS]
-	cmp bl, 32 ;ensure that the list isn't full
+	cmp bl, MAX_KEYS ;ensure that the list isn't full
 	jae key_isr_done
 ;otherwise, write the result back
 	mov [ds:bx+START_KEYBUF], al
@@ -71,14 +73,17 @@ key_isr_done:
 	iret
 	
 BDA_SEGMENT equ 0x0040
-START_KEYBUF equ 0x0020
-NUM_KEYS equ START_KEYBUF + 0x0020
+MAX_KEYS equ 0x20
+START_KEYBUF equ 0x0000
+NUM_KEYS equ START_KEYBUF + MAX_KEYS
 
 int16_jump_table:
 	dw int16_read_keypress
 	dw int16_get_kbdstate
 	
+; this is the scancode-to-ascii conversion table
 key_scancode_table:
+	
 	
 ; The keyboard has two modes of operation, make/release and typematic (though they can be engaged at the same time, as is their default operation mode - this BIOS only cares about typematic)
 ; In make/release mode, whenever a key is pressed down, a byte is sent indicating that to the computer. Similarly, a different code identifying the key released is sent when a key is released.
