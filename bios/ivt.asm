@@ -37,8 +37,8 @@ IVT:
 	dw 0
 	dw 0
 ;int 09
-	dw 0
-	dw 0
+	dw key_isr
+	dw 0xf000
 ;int 0a
 	dw 0
 	dw 0
@@ -61,30 +61,32 @@ IVT:
 	dw int10_isr
 	dw 0xf000
 ;int 11
-	dw 0
-	dw 0
+	dw int11_isr
+	dw 0xf000
 ;int 12
-	dw 0
-	dw 0
+	dw int12_isr
+	dw 0xf000
 ;int 13
 	dw int13_isr
 	dw 0xf000
 ;int 14
-	dw 0
-	dw 0
+	dw int14_isr
+	dw 0xf000
 ;int 15
 	dw 0
 	dw 0
 ;int 16
-	dw 0
-	dw 0
+	dw int16_isr
+	dw 0xf000
 ;int 17
-	dw 0
-	dw 0
+	dw int17_isr
+	dw 0xf000
 ;int 18
 	dw int18_isr
 	dw 0xf000
 ;int 19
 	dw int19_isr
 	dw 0xf000
-
+;int 1a
+	dw int1a_isr
+	dw 0xf000

@@ -5,6 +5,41 @@
 #define REG(modrm) ((modrm & 0x38) >> 3)
 #define RM(modrm) (modrm & 0x7)
 
+#define REPE_INSTRUCTION(byte)		(byte == 0xAE || byte == 0xAF || byte == 0xA6 || byte == 0xA7)
+
+#define init_string_op()			uint16_t source_base = using_segment_override ? segment_override : cpu->ds; \
+									uint16_t dest_base = cpu->es;
+
+#define finish_string_op_8(name)	log_instruction(cpu, logging_instructions == 1, name); \
+									if (cpu->flags & 0x400){ \
+										cpu->si--; \
+										cpu->di--; \
+									} else{ \
+										cpu->si++; \
+										cpu->di++; \
+									} \
+									cpu->ip++;									
+
+#define finish_string_op_16(name)	log_instruction(cpu, logging_instructions == 1, name); \
+									if (cpu->flags & 0x400){ \
+										cpu->si -= 2; \
+										cpu->di -= 2; \
+									} else{ \
+										cpu->si += 2; \
+										cpu->di += 2; \
+									} \
+									cpu->ip++;
+
+#define seg_override(seg, name)		int old_logging = logging_instructions; \
+									log_instruction(cpu, logging_instructions == 1, name); \
+									logging_instructions = old_logging ? 2 : 0; \
+									using_segment_override = 1; \
+									segment_override = seg; \
+									cpu->ip++; \
+									cpu_step(cpu, bus); \
+									using_segment_override = 0; \
+									logging_instructions = old_logging;
+
 #define decode_modrm_src_8()		uint8_t modrm = bus->peek_byte(linear_addr_rm(cpu->cs, cpu->ip + 1)); \
 									uint16_t base = calc_base(cpu, modrm); \
 									uint16_t offset; \
@@ -66,6 +101,7 @@
 									cpu_set_sf(cpu, (int16_t)(int8_t)val); \
 
 #define cjmp(cond)					uint16_t jump_target = calc_rel8_jmp(cpu, bus); \
+									log_instruction(cpu, 0, "%04x\n", jump_target); \
 									if (cond){ \
 										cpu->ip = jump_target; \
 									} else{ \
@@ -158,3 +194,6 @@ uint16_t cpu_pop_16(regs_x86*, bus_x86*);
 uint8_t cpu_get_reg_8(regs_x86*, uint8_t);
 uint16_t cpu_get_reg_16(regs_x86*, uint8_t);
 uint32_t linear_addr_rm(uint16_t, uint16_t);
+void log_instruction(regs_x86*, int, char* fmt, ...);
+
+extern int logging_instructions;

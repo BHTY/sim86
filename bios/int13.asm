@@ -62,12 +62,21 @@ int13_sel_dev:
 	out 0x3, al
 	mov al, 0x00
 	out 0x2, al
+; output track #
 	mov al, ch
 	out 0x3, al
-	mov al, cl
-	out 0x3, al
+; output head #
 	mov al, dh
 	out 0x3, al
+; output sector #
+	mov al, cl
+	out 0x3, al
+	ret
+	
+int13_get_params: ;drive # stored in DL, returns # of disks
+	;this is a literal stub
+	xor bl, bl
+	xor dl, dl
 	ret
 	
 int13_jump_table:
@@ -75,7 +84,11 @@ int13_jump_table:
 	dw 0 ;status
 	dw int13_read
 	dw 0 ;write
-	; ...
+	dw 0 ;verify
+	dw 0 ;format
+	dw 0 ;
+	dw 0 ;
+	dw int13_get_params ;get drive params
 	
 ; The Disk Interface works via two ports - a command port (0x02) and a data port (0x03)
 ; The command port and accepts the following commands:
